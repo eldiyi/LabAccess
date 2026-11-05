@@ -11,6 +11,10 @@
 
 ---
 
+> **Estado (P2.2):** versión única del equipo, funcionando contra el backend de la asignatura. Es **insegura a propósito** hasta el Bloque III. Para compilarla y ver qué falta, consulta la [sección 6](#6-versión-consolidada-p22).
+
+---
+
 ## 2. Descripción de la Aplicación y Alcance (Apartado 5.1)
 Nuestra aplicación será utilizada por el personal de seguridad de un laboratorio para ejercer el control de acceso del personal a una sala crítica, a la vez que mantiene un registro y monitorización centralizados de los efectivos a cargo en cada momento, qué personas entraron y a qué horas. 
 
@@ -61,3 +65,51 @@ Se ha seleccionado e inspeccionado la aplicación del dominio de control de acce
 ## 5. Higiene del Repositorio y Git (Apartado 5.3)
 * El repositorio cuenta con un fichero `.gitignore` configurado que excluye directorios generados (`/build`, `.gradle`), ficheros locales de entorno (`local.properties`) y cualquier fichero de almacén de claves (`*.jks`, `*.keystore`).
 * Se respeta la política de **cero secretos en el histórico de commits**, evitando el registro de credenciales o tokens en claro en las revisiones del código.
+* Tras P2.2, `.gitignore` excluye además certificados y claves (`*.pem`, `*.key`, `*.p12`), `.env` y las extracciones del dispositivo (`*.db`, `*.db-wal`, `*.db-shm`, `sesion.xml`), porque contienen tokens y datos en claro.
+* El backend de la asignatura **no se versiona aquí**: su código lleva escritas las contraseñas de los usuarios de prueba.
+
+---
+
+## 6. Versión consolidada (P2.2)
+
+### Implementación de referencia
+La rama principal parte del proyecto base de la asignatura, adaptado a las convenciones del equipo (paquete `es.uma.seguridad.labaccess`, `minSdk` 34, `targetSdk` 36). No se han añadido medidas de protección: guardar en claro, registrar datos sensibles y usar HTTP son el punto de partida del Bloque III.
+
+### Compilar y ejecutar
+Hace falta Android Studio con el SDK de la API 37 y un emulador, además del backend del paquete `Material_comun_backend_y_proyecto_base` de la asignatura.
+
+1. Arranca el backend desde su carpeta y comprueba que responde:
+   ```powershell
+   py servidor.py
+   curl.exe http://localhost:8080/api/salud
+   ```
+2. Abre este repositorio en Android Studio, sincroniza Gradle y ejecuta en el emulador. Desde la línea de comandos: `.\gradlew.bat assembleDebug`.
+3. Entra con un usuario de prueba de `backend/LEEME.md` y pulsa **Recargar**.
+
+La dirección del backend es `ClienteRed.BASE_URL`, en `datos/ApiServicio.kt`. Vale `http://10.0.2.2:8080/` para el emulador; en un teléfono físico hay que poner la IP del ordenador.
+
+### Del modelo base al dominio
+El backend es común y no cambia, así que la API sigue usando `/api/elementos` y sus campos JSON originales; `@SerialName` los traduce a nuestro modelo. Por eso los datos que se ven son los de ejemplo de la asignatura, no registros reales de una sala.
+
+| Proyecto base | LabAccess |
+| :--- | :--- |
+| `Elemento` | `RegistroAcceso` |
+| `RespuestaElementos` | `RespuestaRegistros` |
+| `ElementoEntidad` / `ElementoDao` | `RegistroAccesoEntidad` / `RegistroAccesoDao` |
+| Campos `titulo` / `contenido` | Campos `persona` / `detalle` |
+| Columna `propietario` | Columna `vigilante` |
+| Tabla `elementos` | Tabla `registros_acceso` |
+| Fichero `appbase.db` | Fichero `labaccess.db` |
+
+### Reparto de los requisitos en el código
+
+| Requisito | Responsable | Dónde está | Estado |
+| :--- | :--- | :--- | :--- |
+| Autenticación de usuario | Jorge Manuel Gutiérrez Melgar | `datos/Repositorio.kt` (`iniciarSesion`, `cerrarSesion`), `ui/PantallaLogin.kt` | Funciona, sin proteger |
+| Almacenamiento local de datos sensibles | Ignacio Ferrer Téllez | `datos/SesionLocal.kt`, `datos/BaseDatos.kt` | Funciona, en claro |
+| Llamada a una API remota | Eduardo Jiliberto Cañizal | `datos/ApiServicio.kt`, `datos/Repositorio.kt` (`obtenerRegistros`) | Funciona, por HTTP |
+| Permiso peligroso justificado | Pablo Cervantes Pardo | Aún sin código | Pendiente de P2.3 |
+
+### Documentación
+* [Inventario de datos sensibles](docs/inventario_datos_sensibles.md): tabla de la sección 6.2 de P2.2.
+* [Documento de alcance](docs/Documento_de_Alcance.md): borrador actualizado, a cerrar en P2.3.

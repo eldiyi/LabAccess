@@ -18,3 +18,19 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+*.pem
+*.p12
+*.key
+secrets.properties
+.env
+
+# Extracciones del dispositivo: contienen tokens y datos en claro
+*.db
+*.db-wal
+*.db-shm
+sesion.xml
+
+# Entorno local
+.idea/
+.kotlin/
+build/
