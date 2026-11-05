@@ -22,5 +22,5 @@ contendrán en el dominio: quién entra, en qué sala y a qué hora.
 No se incluyen en la tabla porque hoy no hay código que los maneje. Hay que
 añadirlos cuando se implementen:
 
-- Contenido de los códigos QR y credenciales leídas con la cámara (P2.3).
+- Contenido de los códigos QR y credenciales leídas con la cámara: hoy sólo se solicita el permiso.
 - Claves de apertura, si el proyecto las llega a incorporar.

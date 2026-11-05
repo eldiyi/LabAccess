@@ -11,7 +11,7 @@
 
 ---
 
-> **Estado (P2.2):** versión única del equipo, funcionando contra el backend de la asignatura. Es **insegura a propósito** hasta el Bloque III. Para compilarla y ver qué falta, consulta la [sección 6](#6-versión-consolidada-p22).
+> **Estado (fin del Bloque II):** proyecto base del equipo, con acceso, listado, detalle, persistencia, red y permiso de cámara, funcionando contra el backend de la asignatura. Es **insegura a propósito** hasta el Bloque III. Para compilarla, consulta la [sección 6](#6-proyecto-base-del-equipo-bloque-ii).
 
 ---
 
@@ -70,7 +70,7 @@ Se ha seleccionado e inspeccionado la aplicación del dominio de control de acce
 
 ---
 
-## 6. Versión consolidada (P2.2)
+## 6. Proyecto base del equipo (Bloque II)
 
 ### Implementación de referencia
 La rama principal parte del proyecto base de la asignatura, adaptado a las convenciones del equipo (paquete `es.uma.seguridad.labaccess`, `minSdk` 34, `targetSdk` 36). No se han añadido medidas de protección: guardar en claro, registrar datos sensibles y usar HTTP son el punto de partida del Bloque III.
@@ -84,7 +84,7 @@ Hace falta Android Studio con el SDK de la API 37 y un emulador, además del bac
    curl.exe http://localhost:8080/api/salud
    ```
 2. Abre este repositorio en Android Studio, sincroniza Gradle y ejecuta en el emulador. Desde la línea de comandos: `.\gradlew.bat assembleDebug`.
-3. Entra con un usuario de prueba de `backend/LEEME.md` y pulsa **Recargar**.
+3. Entra con un usuario de prueba de `backend/LEEME.md`, pulsa **Recargar** y abre una tarjeta para ver su detalle.
 
 La dirección del backend es `ClienteRed.BASE_URL`, en `datos/ApiServicio.kt`. Vale `http://10.0.2.2:8080/` para el emulador; en un teléfono físico hay que poner la IP del ordenador.
 
@@ -101,15 +101,22 @@ El backend es común y no cambia, así que la API sigue usando `/api/elementos` 
 | Tabla `elementos` | Tabla `registros_acceso` |
 | Fichero `appbase.db` | Fichero `labaccess.db` |
 
+### Interfaz y entradas externas
+El listado abre cada registro en `ui/PantallaDetalle.kt`, por la ruta `detalle/{id}`. Esa misma pantalla se abre desde fuera con el enlace profundo `appsegura://detalle/{id}`:
+
+```powershell
+adb shell am start -a android.intent.action.VIEW -d "appsegura://detalle/2" es.uma.seguridad.labaccess
+```
+
 ### Reparto de los requisitos en el código
 
 | Requisito | Responsable | Dónde está | Estado |
 | :--- | :--- | :--- | :--- |
 | Autenticación de usuario | Jorge Manuel Gutiérrez Melgar | `datos/Repositorio.kt` (`iniciarSesion`, `cerrarSesion`), `ui/PantallaLogin.kt` | Funciona, sin proteger |
 | Almacenamiento local de datos sensibles | Ignacio Ferrer Téllez | `datos/SesionLocal.kt`, `datos/BaseDatos.kt` | Funciona, en claro |
-| Llamada a una API remota | Eduardo Jiliberto Cañizal | `datos/ApiServicio.kt`, `datos/Repositorio.kt` (`obtenerRegistros`) | Funciona, por HTTP |
-| Permiso peligroso justificado | Pablo Cervantes Pardo | Aún sin código | Pendiente de P2.3 |
+| Llamada a una API remota | Eduardo Jiliberto Cañizal | `datos/ApiServicio.kt`, `datos/Repositorio.kt` (`obtenerRegistros`, `obtenerRegistro`) | Funciona, por HTTP |
+| Permiso peligroso justificado | Pablo Cervantes Pardo | `ui/PantallaLista.kt`, `AndroidManifest.xml` | Se solicita y, si se deniega, el resto sigue funcionando. La lectura de códigos QR no está implementada |
 
 ### Documentación
 * [Inventario de datos sensibles](docs/inventario_datos_sensibles.md): tabla de la sección 6.2 de P2.2.
-* [Documento de alcance](docs/Documento_de_Alcance.md): borrador actualizado, a cerrar en P2.3.
+* [Documento de alcance](docs/Documento_de_Alcance.md): entregable del Bloque II, con la superficie expuesta.

@@ -147,6 +147,19 @@ class Repositorio(
         }
     }
 
+    suspend fun obtenerRegistro(id: Int): EstadoUi<RegistroAcceso> =
+        withContext(Dispatchers.IO) {
+            val token = sesion.obtenerToken()
+                ?: return@withContext EstadoUi.Error(MotivoError.SesionCaducada)
+            try {
+                EstadoUi.Exito(api.registro("Bearer $token", id))
+            } catch (e: IOException) {
+                EstadoUi.Error(MotivoError.SinConexion)
+            } catch (e: Exception) {
+                EstadoUi.Error(MotivoError.Desconocido)
+            }
+        }
+
     /**
      * Cierra la sesión.
      *

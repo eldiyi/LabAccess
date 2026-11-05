@@ -39,6 +39,12 @@ interface ApiServicio {
     @GET("api/elementos")
     suspend fun registros(@Header("Authorization") autorizacion: String): RespuestaRegistros
 
+    @GET("api/elementos/{id}")
+    suspend fun registro(
+        @Header("Authorization") autorizacion: String,
+        @Path("id") id: Int
+    ): RegistroAcceso
+
     @GET("api/perfil")
     suspend fun perfil(@Header("Authorization") autorizacion: String): Perfil
 }
