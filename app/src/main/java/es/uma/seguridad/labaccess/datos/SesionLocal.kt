@@ -2,74 +2,249 @@ package es.uma.seguridad.labaccess.datos
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Base64
+import android.util.Log
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import javax.crypto.Cipher
 
 /* ==========================================================================
-   LA SESIÓN DEL USUARIO
-   Teoría: sesión 2.2.5 (almacenamiento) y 2.5.5 (persistencia).
+   LA SESIÓN DEL VIGILANTE · versión cifrada y ligada a la biometría
+   Teoría: sesión 3.3, diapositivas 19, 20 y 21. Práctica P3.1, paso 4.
+   Responsable: Ignacio Ferrer Téllez.
 
-   Guarda el token de sesión y el nombre de usuario para que la aplicación
-   recuerde quién ha entrado entre un arranque y el siguiente.
+   Parte de paso4/SesionLocal.kt del material de P3.1. Cambios propios de
+   LabAccess, marcados con [LabAccess] en el código:
 
-   AVISO: aquí se guarda SIN NINGUNA PROTECCIÓN, a propósito. En la sección 5
-   de la práctica vas a leer este mismo fichero desde adb y verás el token en
-   texto claro. En la práctica P3.1 lo sustituirás por una clave del almacén
-   del sistema (Android Keystore).
+   1. El paquete cifrado guarda TRES valores: token, usuario y la contraseña
+      aleatoria de la base de datos (SQLCipher). Una huella lo abre todo.
+   2. La base de datos vive lo mismo que la sesión: al cerrar sesión, al
+      invalidarse la clave o al encontrar una base de datos huérfana, se
+      borra el fichero entero (con -wal y -shm). Protege el relevo de turno.
+   3. Limpieza de lo que dejó la versión de P2.2: los campos "token" y
+      "usuario" en claro y el labaccess.db sin cifrar. Cifrar en la versión
+      N+1 no protege lo que escribió la versión N si nadie lo borra.
+   4. Una única instancia por proceso (obtener()). Con dos instancias, el
+      VistaModelo (que sobrevive a un giro de pantalla) y la puerta
+      biométrica tendrían cada uno su copia del token en memoria.
+
+   Lo que NO protege: mientras la sesión está ABIERTA, el token y la
+   contraseña de la base de datos están en la memoria del proceso. El
+   cifrado protege el disco, no el proceso en ejecución.
    ========================================================================== */
 
-class SesionLocal(contexto: Context) {
+class SesionLocal private constructor(contexto: Context) {
 
-    /**
-     * SharedPreferences es un fichero XML dentro del directorio privado de la
-     * aplicación. MODE_PRIVATE significa que ninguna otra aplicación puede
-     * leerlo... siempre que nadie tenga acceso al dispositivo con adb y la
-     * aplicación sea depurable. Ésa es exactamente la suposición que vamos a
-     * romper en la sección 5.
-     */
+    private val contextoApp: Context = contexto.applicationContext
+
     private val preferencias: SharedPreferences =
-        contexto.getSharedPreferences(NOMBRE_FICHERO, Context.MODE_PRIVATE)
+        contextoApp.getSharedPreferences(NOMBRE_FICHERO, Context.MODE_PRIVATE)
+
+    /** En qué situación está la sesión. La puerta biométrica la observa. */
+    enum class Estado {
+        /** No hay nada guardado: hay que iniciar sesión. */
+        SIN_SESION,
+
+        /** Se acaba de iniciar sesión y falta confirmar con la huella para guardarla cifrada. */
+        PENDIENTE_DE_GUARDAR,
+
+        /** Hay sesión guardada pero todavía no se ha desbloqueado. */
+        BLOQUEADA,
+
+        /** Desbloqueada: los secretos están en memoria y la aplicación puede trabajar. */
+        ABIERTA
+    }
+
+    @Volatile private var tokenEnMemoria: String? = null
+    @Volatile private var usuarioEnMemoria: String? = null
+    @Volatile private var claveBdEnMemoria: ByteArray? = null
+
+    private val _estado: MutableStateFlow<Estado>
+    val estado: StateFlow<Estado>
+
+    init {
+        limpiarRestosDeVersionesAnteriores()
+        _estado = MutableStateFlow(
+            if (preferencias.contains(CLAVE_DATOS)) Estado.BLOQUEADA else Estado.SIN_SESION
+        )
+        estado = _estado.asStateFlow()
+    }
 
     /**
-     * Guarda la sesión: dos cadenas, en claro, en un XML.
+     * [LabAccess] Borra lo que quedó en claro de versiones anteriores y la base
+     * de datos huérfana.
      *
-     * apply() escribe en memoria y vuelca a disco en segundo plano. La
-     * alternativa, commit(), escribe de forma síncrona y devuelve si ha ido
-     * bien; aquí no hace falta y bloquearía el hilo que llama.
+     * - Campos "token" y "usuario" de P2.2: en claro, legibles con run-as.
+     * - Si no hay sesión guardada, cualquier labaccess.db que exista es o bien
+     *   el de P2.2 (en claro) o bien uno cifrado con una contraseña que ya no
+     *   tenemos (sesión que nunca se llegó a proteger). En ambos casos sobra.
+     */
+    private fun limpiarRestosDeVersionesAnteriores() {
+        if (preferencias.contains(CLAVE_HEREDADA_TOKEN) || preferencias.contains(CLAVE_HEREDADA_USUARIO)) {
+            preferencias.edit()
+                .remove(CLAVE_HEREDADA_TOKEN)
+                .remove(CLAVE_HEREDADA_USUARIO)
+                .commit()
+            Log.i(ETIQUETA, "Eliminados campos de sesión en claro de una versión anterior")
+        }
+        if (!preferencias.contains(CLAVE_DATOS)) {
+            BaseDatos.cerrarYBorrar(contextoApp)
+        }
+    }
+
+    /* ----------------------------------------------------------------------
+       LO QUE VE EL RESTO DE LA APLICACIÓN (misma firma que en P2.2)
+       ---------------------------------------------------------------------- */
+
+    /**
+     * Guarda la sesión... en memoria, y marca que falta persistirla cifrada.
+     *
+     * No puede cifrar aquí: la clave exige autenticación y esta función se
+     * llama desde una corrutina del repositorio, sin pantalla. La puerta
+     * biométrica verá PENDIENTE_DE_GUARDAR y pedirá la huella.
+     *
+     * [LabAccess] Cada inicio de sesión estrena base de datos y contraseña: la
+     * del vigilante anterior se destruye antes.
      */
     fun guardarSesion(token: String, usuario: String) {
-        preferencias.edit()
-            .putString(CLAVE_TOKEN, token)
-            .putString(CLAVE_USUARIO, usuario)
-            .apply()
+        BaseDatos.cerrarYBorrar(contextoApp)
+        olvidarClaveBd()
+        tokenEnMemoria = token
+        usuarioEnMemoria = usuario
+        claveBdEnMemoria = Cripto.generarClaveBaseDatos()
+        _estado.value = Estado.PENDIENTE_DE_GUARDAR
     }
 
+    fun obtenerToken(): String? = tokenEnMemoria
+
+    fun obtenerUsuario(): String? = usuarioEnMemoria
+
+    fun haySesion(): Boolean = tokenEnMemoria != null
+
     /**
-     * Devuelve el token, o null si no hay sesión.
-     *
-     * Fíjate en el tipo: String?, con interrogación. Es la garantía de la
-     * sesión 2.4.2. Quien llame a esta función está obligado por el compilador
-     * a decidir qué pasa cuando no hay token, y no puede olvidarse.
+     * [LabAccess] La contraseña de la base de datos, o null si la sesión no está
+     * abierta. Se devuelve una COPIA: SQLCipher borra el array que recibe.
      */
-    fun obtenerToken(): String? = preferencias.getString(CLAVE_TOKEN, null)
-
-    /** El usuario de la sesión, o null. Sirve para saber de quién son los datos locales. */
-    fun obtenerUsuario(): String? = preferencias.getString(CLAVE_USUARIO, null)
+    fun obtenerClaveBaseDatos(): ByteArray? = claveBdEnMemoria?.copyOf()
 
     /**
-     * Borra los datos de sesión de ESTE fichero.
-     *
-     * clear() vacía el XML entero, así que después la aplicación ya no está
-     * autenticada. Otra cosa es que no quede nada del usuario en el
-     * dispositivo: eso lo comprobarás tú en la sección 5.5.
+     * Cierra la sesión y borra TODO lo del vigilante en el dispositivo:
+     * secretos en memoria, preferencias y base de datos (con -wal y -shm).
+     * La clave del almacén se queda: no se ha invalidado nada.
      */
     fun cerrarSesion() {
-        preferencias.edit().clear().apply()
+        olvidarSecretos()
+        preferencias.edit().clear().commit()
+        BaseDatos.cerrarYBorrar(contextoApp)
+        _estado.value = Estado.SIN_SESION
     }
 
-    fun haySesion(): Boolean = obtenerToken() != null
+    /* ----------------------------------------------------------------------
+       LO QUE USA LA PUERTA BIOMÉTRICA
+
+       El cifrador se crea aquí, se entrega al diálogo del sistema y sólo
+       vuelve utilizable si la autenticación salió bien.
+       ---------------------------------------------------------------------- */
+
+    /** Cifrador para persistir la sesión recién iniciada. Va al diálogo. */
+    fun cifradorParaGuardar(): Cipher = Cripto.cifradorParaCifrar()
+
+    /** Cifrador para abrir la sesión guardada. Va al diálogo. */
+    fun cifradorParaAbrir(): Cipher {
+        val paquete = preferencias.getString(CLAVE_DATOS, null)
+            ?: throw IllegalStateException("No hay sesión guardada")
+        return Cripto.cifradorParaDescifrar(paquete)
+    }
+
+    /** Termina de guardar con el cifrador que devuelve el diálogo (el único habilitado). */
+    fun completarGuardado(cifrador: Cipher) {
+        val token = tokenEnMemoria ?: return
+        val usuario = usuarioEnMemoria ?: ""
+        val claveBd = claveBdEnMemoria ?: return
+        val claro = listOf(token, usuario, Base64.encodeToString(claveBd, Base64.NO_WRAP))
+            .joinToString(SEPARADOR_CAMPOS)
+        val paquete = Cripto.empaquetar(cifrador, claro)
+        preferencias.edit().putString(CLAVE_DATOS, paquete).commit()
+        _estado.value = Estado.ABIERTA
+    }
+
+    /**
+     * Termina de abrir con el cifrador que devuelve el diálogo.
+     *
+     * Devuelve false si los datos ya no se pueden recuperar y, en ese caso,
+     * los descarta: no hay nada que reintentar.
+     */
+    fun completarApertura(cifrador: Cipher): Boolean {
+        val paquete = preferencias.getString(CLAVE_DATOS, null) ?: return false
+        return try {
+            val campos = Cripto.desempaquetar(cifrador, paquete).split(SEPARADOR_CAMPOS)
+            require(campos.size == 3) { "Formato de sesión no reconocido" }
+            tokenEnMemoria = campos[0]
+            usuarioEnMemoria = campos[1]
+            claveBdEnMemoria = Base64.decode(campos[2], Base64.NO_WRAP)
+            _estado.value = Estado.ABIERTA
+            true
+        } catch (e: Exception) {
+            // Se registra QUE ha fallado y de qué tipo. Nunca el contenido.
+            Log.w(ETIQUETA, "Sesión irrecuperable: ${e.javaClass.simpleName}")
+            descartarSesionIrrecuperable()
+            false
+        }
+    }
+
+    /**
+     * Cuando la clave ya no sirve (huella nueva, bloqueo de pantalla retirado,
+     * paquete manipulado). Se borra todo: datos cifrados, base de datos y la
+     * propia clave, que puede estar invalidada.
+     */
+    fun descartarSesionIrrecuperable() {
+        olvidarSecretos()
+        preferencias.edit().clear().commit()
+        BaseDatos.cerrarYBorrar(contextoApp)
+        try {
+            Cripto.borrarClave()
+        } catch (e: Exception) {
+            Log.w(ETIQUETA, "No se ha podido borrar la clave: ${e.javaClass.simpleName}")
+        }
+        _estado.value = Estado.SIN_SESION
+    }
+
+    /* ---------------------------------------------------------------------- */
+
+    private fun olvidarSecretos() {
+        tokenEnMemoria = null
+        usuarioEnMemoria = null
+        olvidarClaveBd()
+    }
+
+    /** Sobrescribe la contraseña en memoria antes de soltarla (mejor esfuerzo). */
+    private fun olvidarClaveBd() {
+        claveBdEnMemoria?.fill(0)
+        claveBdEnMemoria = null
+    }
 
     companion object {
+        private const val ETIQUETA = "SesionLocal"
+
         const val NOMBRE_FICHERO = "sesion"
-        const val CLAVE_TOKEN = "token"
-        const val CLAVE_USUARIO = "usuario"
+
+        /** Un único campo: una operación criptográfica, una sola huella. */
+        const val CLAVE_DATOS = "datos"
+
+        /** Campos en claro que escribía la versión de P2.2. Sólo para borrarlos. */
+        private const val CLAVE_HEREDADA_TOKEN = "token"
+        private const val CLAVE_HEREDADA_USUARIO = "usuario"
+
+        /** Separa los campos dentro del paquete cifrado. */
+        private const val SEPARADOR_CAMPOS = "\u0000"
+
+        @Volatile private var instancia: SesionLocal? = null
+
+        /** [LabAccess] Una sola instancia por proceso, compartida por repositorio y puerta. */
+        fun obtener(contexto: Context): SesionLocal =
+            instancia ?: synchronized(this) {
+                instancia ?: SesionLocal(contexto).also { instancia = it }
+            }
     }
 }

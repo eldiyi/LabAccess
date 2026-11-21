@@ -64,11 +64,18 @@ class VistaModelo(private val repositorio: Repositorio) : ViewModel() {
      * antes de seguir y compruébala en la sección 5.5.
      */
     fun salir() {
+        /*
+         * [P3.1] Los estados se vacían ANTES de cerrar la sesión. Con la puerta
+         * biométrica, cerrar la sesión hace que la navegación se recomponga
+         * desde cero; si estadoLogin siguiera en Exito en ese momento, la
+         * pantalla de acceso saltaría sola al listado. Además, así los datos
+         * del vigilante dejan de estar en el estado de la interfaz cuanto antes.
+         */
+        _estadoLogin.value = EstadoUi.Reposo
+        _estadoLista.value = EstadoUi.Reposo
+        _estadoDetalle.value = EstadoUi.Reposo
         viewModelScope.launch {
             repositorio.cerrarSesion()
-            _estadoLogin.value = EstadoUi.Reposo
-            _estadoLista.value = EstadoUi.Reposo
-            _estadoDetalle.value = EstadoUi.Reposo
         }
     }
 }

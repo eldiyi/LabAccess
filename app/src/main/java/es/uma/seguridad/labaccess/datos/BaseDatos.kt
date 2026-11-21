@@ -2,6 +2,7 @@ package es.uma.seguridad.labaccess.datos
 
 import android.content.Context
 import androidx.room.*
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 /* ==========================================================================
    LA BASE DE DATOS LOCAL
@@ -12,9 +13,9 @@ import androidx.room.*
    seguir consultando el histórico si cae la red. Room es una capa sobre SQLite que escribe
    el SQL por ti y comprueba las consultas al compilar.
 
-   AVISO: el fichero de base de datos se escribe SIN CIFRAR. No es un descuido,
-   es el comportamiento por defecto de Room. En la sección 5.3 lo sacarás del
-   dispositivo y lo abrirás; en la práctica P3.1 lo cifrarás.
+   P3.1 (Ignacio Ferrer Téllez): desde esta versión el fichero se escribe
+   CIFRADO con SQLCipher (AES-256 por página). Room no cifra por sí mismo;
+   SQLCipher sustituye a la capa SQLite que hay debajo. Ver abrir() más abajo.
    ========================================================================== */
 
 /**
@@ -72,14 +73,59 @@ abstract class BaseDatos : RoomDatabase() {
          */
         @Volatile private var instancia: BaseDatos? = null
 
-        fun obtener(contexto: Context): BaseDatos =
+        /*
+         * [P3.1 · LabAccess] La base de datos se abre CIFRADA con SQLCipher.
+         *
+         * La contraseña (32 bytes aleatorios) no está en ningún fichero en
+         * claro: viaja dentro del paquete de la sesión, cifrado con la clave
+         * del Android Keystore que exige huella. Por eso la base de datos sólo
+         * puede abrirse DESPUÉS de desbloquear la sesión, y ya no se construye
+         * al arrancar MainActivity sino la primera vez que el repositorio la
+         * necesita.
+         *
+         * SupportOpenHelperFactory pone a cero el array que recibe tras abrir
+         * la base de datos, de modo que la contraseña no se queda en esta
+         * clase. Quien llama debe pasar una copia (SesionLocal ya lo hace).
+         */
+        fun abrir(contexto: Context, contrasena: ByteArray): BaseDatos =
             instancia ?: synchronized(this) {
-                instancia ?: Room.databaseBuilder(
-                    contexto.applicationContext,
-                    BaseDatos::class.java,
-                    NOMBRE_FICHERO
-                ).build().also { instancia = it }
+                instancia ?: run {
+                    cargarSqlCipher()
+                    Room.databaseBuilder(
+                        contexto.applicationContext,
+                        BaseDatos::class.java,
+                        NOMBRE_FICHERO
+                    )
+                        .openHelperFactory(SupportOpenHelperFactory(contrasena))
+                        .build()
+                        .also { instancia = it }
+                }
             }
+
+        /**
+         * [P3.1 · LabAccess] Cierra la base de datos y borra el fichero con su
+         * -wal, su -shm y su -journal (deleteDatabase se ocupa de los cuatro).
+         *
+         * Se llama al cerrar sesión, al invalidarse la clave y al empezar una
+         * sesión nueva: los registros de un vigilante no sobreviven a su turno.
+         */
+        fun cerrarYBorrar(contexto: Context) {
+            synchronized(this) {
+                instancia?.close()
+                instancia = null
+                contexto.applicationContext.deleteDatabase(NOMBRE_FICHERO)
+            }
+        }
+
+        @Volatile private var sqlCipherCargado = false
+
+        /** La biblioteca nativa de SQLCipher debe cargarse antes de abrir nada. */
+        private fun cargarSqlCipher() {
+            if (!sqlCipherCargado) {
+                System.loadLibrary("sqlcipher")
+                sqlCipherCargado = true
+            }
+        }
 
         /** El fichero acaba en /data/data/<tu.paquete>/databases/labaccess.db */
         const val NOMBRE_FICHERO = "labaccess.db"

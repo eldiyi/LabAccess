@@ -23,7 +23,13 @@ import java.io.IOException
 class Repositorio(
     private val api: ApiServicio,
     private val sesion: SesionLocal,
-    private val dao: RegistroAccesoDao
+    /*
+     * [P3.1] Antes se recibía el DAO ya construido. Ahora la base de datos
+     * está cifrada con una contraseña que sólo existe tras desbloquear la
+     * sesión con la huella, así que se pide cuando hace falta. Devuelve null
+     * si la sesión no está abierta.
+     */
+    private val proveedorDao: () -> RegistroAccesoDao?
 ) {
 
     /**
@@ -53,7 +59,9 @@ class Repositorio(
                    token desaparece: así demuestras la causa en lugar de
                    suponerla.
                    ---------------------------------------------------------- */
-                Log.d("Repositorio", "Login correcto: $respuesta")
+                // [P3.1 · paso 2a] Antes: Log.d("Repositorio", "Login correcto: $respuesta"),
+                // que volcaba el token entero vía el toString() de la data class.
+                Log.d("Repositorio", "Login correcto")
 
                 sesion.guardarSesion(respuesta.token, respuesta.usuario)
                 EstadoUi.Exito(respuesta)
@@ -78,7 +86,17 @@ class Repositorio(
                  * Cualquier otra cosa. Fíjate en lo que NO se hace: no se
                  * devuelve e.message a la interfaz. Esos mensajes llevan rutas,
                  * consultas y direcciones de servidor.
+                 *
+                 * [P3.1 · paso 4a] Pero tampoco se calla: un catch silencioso
+                 * escondía los fallos del almacén de claves (tercera
+                 * prohibición de la diapositiva 21). Se registra el TIPO de
+                 * fallo y su causa, nunca el contenido ni el mensaje.
                  */
+                Log.w(
+                    "Repositorio",
+                    "Fallo al iniciar sesión: ${e.javaClass.simpleName}" +
+                        " / causa: ${e.cause?.javaClass?.simpleName}"
+                )
                 EstadoUi.Error(MotivoError.Desconocido)
             }
         }
@@ -100,11 +118,14 @@ class Repositorio(
                 ?: return@withContext EstadoUi.Error(MotivoError.SesionCaducada)
             val vigilante = sesion.obtenerUsuario() ?: ""
 
+            // [P3.1] La base de datos cifrada sólo existe con la sesión abierta
+            val dao = proveedorDao()
+
             try {
                 val respuesta = api.registros("Bearer $token")
 
-                // Copia local, marcada con su vigilante
-                dao.guardar(
+                // Copia local (cifrada), marcada con su vigilante
+                dao?.guardar(
                     respuesta.registros.map { registro ->
                         RegistroAccesoEntidad(
                             id = registro.id,
@@ -120,11 +141,17 @@ class Repositorio(
             } catch (e: Exception) {
                 /*
                  * Si la red falla recurrimos a la copia local. Éste es el
-                 * motivo por el que existe la base de datos, y también el
-                 * motivo por el que los datos del usuario están en el disco del
-                 * dispositivo, sin cifrar, hasta que alguien los borre.
+                 * motivo por el que existe la base de datos. [P3.1] Desde P3.1
+                 * esa copia está cifrada con SQLCipher y se borra al cerrar
+                 * sesión. La lectura va protegida: si la sesión se cierra a
+                 * mitad, la base de datos ya no existe y no debe tumbar la app.
                  */
-                val copiaLocal = dao.obtenerDe(vigilante)
+                val copiaLocal = try {
+                    dao?.obtenerDe(vigilante).orEmpty()
+                } catch (e: Exception) {
+                    Log.w("Repositorio", "Copia local no disponible: ${e.javaClass.simpleName}")
+                    emptyList()
+                }
                 if (copiaLocal.isEmpty()) {
                     EstadoUi.Error(MotivoError.SinConexion)
                 } else {
@@ -163,13 +190,11 @@ class Repositorio(
     /**
      * Cierra la sesión.
      *
-     * Borra el token y el usuario de las preferencias, que es lo que hace que
-     * la aplicación deje de estar autenticada.
-     *
-     * PARA EL CUADERNO: ¿basta con esto para que no quede nada del usuario en
-     * el dispositivo? Escribe tu respuesta ANTES de seguir y compruébala en la
-     * sección 5.5 de la práctica. Fíjate en qué funciones ofrece el DAO y en
-     * cuáles se están llamando de verdad.
+     * [P3.1] SesionLocal.cerrarSesion() borra ahora TODO lo del vigilante en el
+     * dispositivo: secretos en memoria, preferencias y el fichero de la base de
+     * datos cifrada con su -wal y su -shm. Antes sólo se vaciaban las
+     * preferencias y los registros se quedaban en disco, en claro, para el
+     * siguiente vigilante del relevo.
      */
     suspend fun cerrarSesion() {
         withContext(Dispatchers.IO) {

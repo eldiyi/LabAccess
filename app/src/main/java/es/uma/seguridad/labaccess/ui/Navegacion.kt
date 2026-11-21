@@ -19,13 +19,20 @@ import es.uma.seguridad.labaccess.modelo.EstadoUi
  * y se comprobará que la navegación no es un control de seguridad (sesión 2.5.3).
  */
 @Composable
-fun Navegacion(vistaModelo: VistaModelo) {
+fun Navegacion(
+    vistaModelo: VistaModelo,
+    /**
+     * [P3.1] Pantalla de entrada. MainActivity pasa "lista" cuando la sesión ya
+     * se ha desbloqueado con la huella, para no pedir otra vez la contraseña.
+     */
+    inicio: String = "login"
+) {
     val navController = rememberNavController()
     val estadoLogin by vistaModelo.estadoLogin.collectAsState()
     val estadoLista by vistaModelo.estadoLista.collectAsState()
     val estadoDetalle by vistaModelo.estadoDetalle.collectAsState()
 
-    NavHost(navController = navController, startDestination = "login") {
+    NavHost(navController = navController, startDestination = inicio) {
 
         composable("login") {
             PantallaLogin(
