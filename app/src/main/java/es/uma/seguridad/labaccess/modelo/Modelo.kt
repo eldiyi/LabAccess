@@ -36,7 +36,15 @@ data class RespuestaLogin(
     val usuario: String,
     val nombre: String,
     val rol: String
-)
+) {
+    /**
+     * [P3.1] Defensa en profundidad: aunque alguien vuelva a escribir
+     * «imprime el objeto», el token no sale. El toString() generado se sustituye
+     * por uno que lo oculta.
+     */
+    override fun toString(): String =
+        "RespuestaLogin(token=<oculto>, usuario=$usuario, nombre=$nombre, rol=$rol)"
+}
 
 /**
  * Un registro de paso por el control de acceso a la sala crítica, devuelto por

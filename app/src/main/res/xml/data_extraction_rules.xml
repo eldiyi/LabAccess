@@ -1,19 +1,30 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   P3.1 · Almacenamiento local seguro (Ignacio Ferrer Téllez)
+
+   Nada de LabAccess sale del terminal por copia de seguridad ni por
+   transferencia a otro dispositivo (Android 12+). Se excluye todo el
+   directorio de la aplicación, y en particular:
+     - shared_prefs/sesion.xml   paquete cifrado con token, usuario y clave de la BD
+     - databases/labaccess.db    registros de acceso (cifrados con SQLCipher)
+
+   Aunque ambos están cifrados y la clave del Android Keystore no viaja con la
+   copia (sería inservible en otro terminal), sacarlos sólo aporta superficie:
+   metadatos, tamaño y la confirmación de que hay una sesión guardada.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
     </device-transfer>
-    -->
 </data-extraction-rules>

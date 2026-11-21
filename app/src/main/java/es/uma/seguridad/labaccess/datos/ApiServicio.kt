@@ -1,6 +1,7 @@
 package es.uma.seguridad.labaccess.datos
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import es.uma.seguridad.labaccess.BuildConfig
 import es.uma.seguridad.labaccess.modelo.*
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -80,8 +81,19 @@ object ClienteRed {
          * ¿Quién podría leer esos registros, y con qué privilegios? Se retoma
          * en la sesión 3.6.
          */
+        /*
+         * [P3.1 · paso 2c] Antes: Level.BODY, que volcaba en logcat la contraseña
+         * del login, el token, la cabecera Authorization y los registros.
+         *
+         * BASIC sólo imprime método, URL, código y tamaño. Y el nivel va atado
+         * al tipo de compilación: en release es NONE sin que nadie tenga que
+         * acordarse de bajarlo («un control que depende de que alguien se
+         * acuerde no es un control»). Ojo: BASIC seguiría imprimiendo un token
+         * que viajase en la URL; en esta API va en cabecera.
+         */
         val registro = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC
+                    else HttpLoggingInterceptor.Level.NONE
         }
 
         /*

@@ -35,6 +35,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // P3.1: BuildConfig.DEBUG decide el nivel del registro de OkHttp
+        buildConfig = true
     }
 }
 
@@ -56,6 +58,10 @@ dependencies {
     implementation(libs.kotlinx.serialization)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.navigation.compose)
+    // P3.1 (almacenamiento local seguro): diálogo biométrico y BD cifrada
+    implementation(libs.biometric)
+    implementation(libs.fragment.ktx)
+    implementation(libs.sqlcipher.android)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
